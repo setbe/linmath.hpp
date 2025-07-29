@@ -1,7 +1,7 @@
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
-// #define LINMATH_FREESTANDING
+#define LINMATH_FREESTANDING
 #include "../linmath.hpp"
 
 #ifdef LINMATH_FREESTANDING
@@ -84,7 +84,7 @@ TEST_CASE("Matrix operations", "[mat4f]") {
 
     SECTION("Rotation around X") {
         mat4f mat = mat4f::identity();
-        mat4f rot_x = mat.rotate_x(mat, lmath::PI_HALF);
+        mat4f rot_x = mat.rotate_x(lmath::PI_HALF);
         vec4 v0{ 0.f, 1.f, 0.f, 1.f };
         vec4 r = rot_x * v0;
         REQUIRE(r.x == Approx(0.f));
@@ -95,7 +95,7 @@ TEST_CASE("Matrix operations", "[mat4f]") {
 
     SECTION("Rotation around Y") {
         mat4f mat = mat4f::identity();
-        mat4f rot_y = mat.rotate_y(mat, lmath::PI_HALF);
+        mat4f rot_y = mat.rotate_y(lmath::PI_HALF);
         vec4 v0{ 1.f, 0.f, 0.f, 1.f };
         vec4 r = rot_y * v0;
         REQUIRE(r.x == Approx(0.f).margin(1e-6f));
@@ -106,7 +106,7 @@ TEST_CASE("Matrix operations", "[mat4f]") {
 
     SECTION("Rotation around Z") {
         mat4f mat = mat4f::identity();
-        mat4f rot_z = mat.rotate_z(mat, lmath::PI_HALF);
+        mat4f rot_z = mat.rotate_z(lmath::PI_HALF);
         vec4 v0{ 1.f, 0.f, 0.f, 1.f };
         vec4 r = rot_z * v0;
         REQUIRE(r.x == Approx(0.f).margin(1e-6f));

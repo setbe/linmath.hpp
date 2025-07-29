@@ -112,10 +112,10 @@ namespace lmath {
         if (x <= 0.0f) return 0.0f;
 
         float x_half = 0.5f * x;
-        int i = *(int*)&x;         // reinterpret as int
-        i = 0x5f3759df - (i >> 1); // magic number
+        union { float f; uint32_t i; } u = { x }; // reinterpret as int
+        u.i = 0x5f3759df - (u.i >> 1); // magic number
 
-        float y = *(float*)&i;
+        float y = *(float*)&u.i; // TODO: UB
         y = y * (1.5f - x_half * y * y); // 1st Newton-Raphson iteration
         return x * y;
     } // sqrtf
@@ -132,6 +132,20 @@ namespace lmath {
     // Forward declaration
     template <typename T, size_t N> struct vec;
 
+    // ----------------------- Aliases for vectors ----------------------------
+
+    using vec2 = vec<float, 2>;
+    using vec3 = vec<float, 3>;
+    using vec4 = vec<float, 4>;
+
+    using ivec2 = vec<int, 2>;
+    using ivec3 = vec<int, 3>;
+    using ivec4 = vec<int, 4>;
+
+    using uvec2 = vec<unsigned, 2>;
+    using uvec3 = vec<unsigned, 3>;
+    using uvec4 = vec<unsigned, 4>;
+
     namespace internal {
         // === Generic vector base class (CRTP) ===
         template <typename Derived, typename T, size_t N>
@@ -139,30 +153,30 @@ struct vec_base {
             // Vector addition: this + other
             LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 Derived operator+ (const Derived& other) const noexcept {
+                const Derived& self = *static_cast<const Derived*>(this);
                 Derived r;
                 for (size_t i = 0; i < N; ++i)
-                    r[i] = static_cast<const Derived*>(this)
-                                                    ->operator[](i) + other[i];
+                    r[i] = self[i] + other[i];
                 return r;
             }
 
             // Vector subtraction: this - other
             LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 Derived operator- (const Derived& other) const noexcept {
+                const Derived& self = *static_cast<const Derived*>(this);
                 Derived r;
                 for (size_t i = 0; i < N; ++i)
-                    r[i] = static_cast<const Derived*>(this)
-                                                    ->operator[](i) - other[i];
+                    r[i] = self[i] - other[i];
                 return r;
             }
 
             // Scalar multiplication: this * scalar
             LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 Derived operator* (T s) const noexcept {
+                const Derived& self = *static_cast<const Derived*>(this);
                 Derived r;
                 for (size_t i = 0; i < N; ++i)
-                    r[i] = static_cast<const Derived*>(this)
-                                                           ->operator[](i) * s;
+                    r[i] = self[i] * s;
                 return r;
             }
 
@@ -178,9 +192,8 @@ static T dot(const Derived& a, const Derived& b) noexcept {
             // Dot product with self
             LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 T dot() const noexcept {
-                return vec_base<Derived, T, N>:: // Call to static member
-                       dot(*static_cast<const Derived*>(this), 
-                           *static_cast<const Derived*>(this));
+                const Derived& self = *static_cast<const Derived*>(this);
+                return vec_base<Derived, T, N>::dot(self, self); // Call to static member
             }
 
             // Vector magnitude (length)
@@ -190,9 +203,10 @@ T length() const noexcept { return sqrtf(this->dot()); }
             // Normalize vector to unit length
             LINMATH_NO_DISCARD
 Derived normalized() const noexcept {
-                T len = this->length();
+                const Derived& self = *static_cast<const Derived*>(this);
+                T len = length();
                 return (len > T(0)) ? 
-                    (*static_cast<const Derived*>(this)) * (T(1) / len)
+                    (self * (T(1) / len))
                   : Derived{};
             }
 
@@ -369,20 +383,6 @@ reflect(const vec<T, 4>& normal) const noexcept {
         } // reflect
     }; // vec4
 
-// ----------------------- Aliases for vectors --------------------------------
-
-using vec2 = vec<float, 2>;
-using vec3 = vec<float, 3>;
-using vec4 = vec<float, 4>;
-
-using ivec2 = vec<int, 2>;
-using ivec3 = vec<int, 3>;
-using ivec4 = vec<int, 4>;
-
-using uvec2 = vec<unsigned, 2>;
-using uvec3 = vec<unsigned, 3>;
-using uvec4 = vec<unsigned, 4>;
-
 
 // --------------------------- mat4 -------------------------------------------
 template <typename T>
@@ -394,9 +394,6 @@ mat4 {
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR vec<T, 4>&       operator[](size_t i) noexcept { return cols[i]; }
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR const vec<T, 4>& operator[](size_t i) const noexcept { return cols[i]; }
 
-
-    LINMATH_NO_DISCARD LINMATH_CONSTEXPR float length(const vec3& v) const noexcept { return sqrtf(v.dot()); }
-    LINMATH_NO_DISCARD LINMATH_CONSTEXPR vec3 normalize(const vec3& v) const noexcept { return v * (1.0f / length(v)); }
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR static mat4 dup(const mat4& n) noexcept { return n; }
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR static vec<T, 4> col(const mat4& m, int i) noexcept { return m[i]; }
 
@@ -538,8 +535,8 @@ mul_vec4(const mat4& m, const vec<T, 4>& v) noexcept {
 
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 vec<T, 4>
-operator* (const vec<T, 4>& vec4) const noexcept {
-        return mat4::mul_vec4(*this, vec4); // Call static member
+operator* (const vec<T, 4>& v) const noexcept {
+        return mat4::mul_vec4(*this, v); // Call static member
     }
 
     // Translation matrix
@@ -555,12 +552,12 @@ translate(T x, T y, T z) noexcept {
 
     // In-place translation
     LINMATH_CONSTEXPR
-static void
-translate_in_place(mat4& m, T x, T y, T z) noexcept {
+void
+translate_in_place(T x, T y, T z) noexcept {
         vec<T, 4> t = { x, y, z, T(0) };
         for (int i = 0; i < 4; ++i) {
-            vec<T, 4> r = row(m, i);
-            m[3][i] += vec<T, 4>::dot(r, t);
+            vec<T, 4> r = row((*this), i);
+            (*this)[3][i] += vec<T, 4>::dot(r, t);
         }
     }
 
@@ -577,66 +574,66 @@ from_vec3_mul_outer(const vec<T, 3>& a, const vec<T, 3>& b) noexcept {
 
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 mat4 
-rotate(const mat4& M, float x, float y, float z, float angle) const noexcept {
+rotate(float x, float y, float z, float angle) const noexcept {
         float s = sinf(angle);
         float c = cosf(angle);
-        vec3 u = { x, y, z };
+        vec<T, 3> u = { x, y, z };
 
-        if (this->length(u) <= 1e-4f)
-            return M;
+        if (u.length() <= 1e-4f)
+            return *this;
 
-        u = this->normalize(u);
-        mat4 T = this->outer_product(u, u);
+        u = u.normalized();
+        mat4 T = mat4::outer_product(u, u);
 
-        mat4 S = this->zero();
+        mat4 S = mat4::zero();
         S[0][1] = u.z; S[0][2] = -u.y;
         S[1][0] = -u.z; S[1][2] = u.x;
         S[2][0] = u.y; S[2][1] = -u.x;
 
         S *= s;
 
-        mat4 C = this->identity() - T;
+        mat4 C = mat4::identity() - T;
         C *= c;
 
         mat4 R = T + C + S;
         R[3][3] = 1.f;
-        return M * R;
+        return (*this) * R;
     } // rotate
 
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 mat4 
-rotate_x(const mat4& M, float angle) const noexcept {
+rotate_x(float angle) const noexcept {
         float s = sinf(angle);
         float c = cosf(angle);
-        mat4 R = { vec4{1.f, 0.f, 0.f, 0.f},
-                   vec4{0.f,   c,   s, 0.f},
-                   vec4{0.f,  -s,   c, 0.f},
-                   vec4{0.f, 0.f, 0.f, 1.f} };
-        return M * R;
+        mat4 R = { vec<T, 4>{1.f, 0.f, 0.f, 0.f},
+                   vec<T, 4>{0.f,   c,   s, 0.f},
+                   vec<T, 4>{0.f,  -s,   c, 0.f},
+                   vec<T, 4>{0.f, 0.f, 0.f, 1.f} };
+        return (*this) * R;
     } // rotate_x
 
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 mat4 
-rotate_y(const mat4& M, float angle) const noexcept {
+rotate_y(float angle) const noexcept {
         float s = sinf(angle);
         float c = cosf(angle);
-        mat4 R = { vec4{   c, 0.f,  -s, 0.f},
-                   vec4{ 0.f, 1.f, 0.f, 0.f},
-                   vec4{   s, 0.f,   c, 0.f},
-                   vec4{ 0.f, 0.f, 0.f, 1.f} };
-        return M * R;
+        mat4 R = { vec<T, 4>{   c, 0.f,  -s, 0.f},
+                   vec<T, 4>{ 0.f, 1.f, 0.f, 0.f},
+                   vec<T, 4>{   s, 0.f,   c, 0.f},
+                   vec<T, 4>{ 0.f, 0.f, 0.f, 1.f} };
+        return (*this) * R;
     }
 
     LINMATH_NO_DISCARD LINMATH_CONSTEXPR
 mat4
-rotate_z(const mat4& M, float angle) const noexcept {
+rotate_z(float angle) const noexcept {
         float s = sinf(angle);
         float c = cosf(angle);
-        mat4 R = { vec4{   c,   s, 0.f, 0.f},
-                   vec4{  -s,   c, 0.f, 0.f},
-                   vec4{ 0.f, 0.f, 1.f, 0.f},
-                   vec4{ 0.f, 0.f, 0.f, 1.f} };
-        return M * R;
+        mat4 R = { vec<T, 4>{   c,   s, 0.f, 0.f},
+                   vec<T, 4>{  -s,   c, 0.f, 0.f},
+                   vec<T, 4>{ 0.f, 0.f, 1.f, 0.f},
+                   vec<T, 4>{ 0.f, 0.f, 0.f, 1.f} };
+        return (*this) * R;
     }
 }; // struct mat4
 
