@@ -1,0 +1,6 @@
+build/
+.vs/
+
+vs/build/
+vs/.vs/
+vs/*.vcxproj.user
