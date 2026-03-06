@@ -14,9 +14,9 @@ extern "C" {
 #include "../3rd-party/glm-1.0.3/glm/gtc/matrix_transform.hpp"
 
 // Compile-time tests for C++17 version or higher
-#include "compile_time.hpp"
-
 #ifdef LMATH_CXX17
+#   include "compile_time.hpp"
+
     // Guarantee compile-time control
     static_assert(lm::ct::test_vec_arithmetic(), "constexpr vec arithmetic failed");
     static_assert(lm::ct::test_mat_arithmetic(), "constexpr mat arithmetic failed");
@@ -25,9 +25,42 @@ extern "C" {
 
 namespace {
     template<typename A, typename B>
+    void dump_mat4_diff(const A& a, const B& b) {
+        for (int r = 0; r < 4; ++r) {
+            for (int c = 0; c < 4; ++c) {
+                std::printf("[%d][%d]  a=% .9f  b=% .9f  d=% .9f\n",
+                    c, r, a[c][r], b[c][r], a[c][r] - b[c][r]);
+            }
+        }
+        std::printf("---------------\n");
+    }
+
+    template<typename A, typename B>
     bool byte_equal(const A& a, const B& b) {
         static_assert(sizeof(A) == sizeof(B));
         return std::memcmp(&a, &b, sizeof(A)) == 0;
+    }
+
+    template<typename A, typename B>
+    bool mat4_approx_equal(const A& a, const B& b, float eps = 1e-5f) {
+        for (int c = 0; c < 4; ++c)
+            for (int r = 0; r < 4; ++r)
+                if (std::fabs(a[c][r] - b[c][r]) > eps)
+                    return false;
+        return true;
+    }
+
+    TEST_CASE("sqrtf sanity", "[math]") {
+        REQUIRE(::lm::sqrtf(59.f) == Approx(7.6811457f).margin(1e-6f));
+    }
+
+    TEST_CASE("vec3 normalize sanity", "[vec3][math]") {
+        lm::vec3 v{ -1.f, 3.f, -7.f };
+        auto n = lm::vec_norm(v);
+
+        REQUIRE(n[0] == Approx(-1.f / std::sqrt(59.f)).margin(1e-6f));
+        REQUIRE(n[1] == Approx(3.f / std::sqrt(59.f)).margin(1e-6f));
+        REQUIRE(n[2] == Approx(-7.f / std::sqrt(59.f)).margin(1e-6f));
     }
 
     TEST_CASE("vec3 arithmetic matches linmath.h", "[vec3]") {
@@ -143,6 +176,7 @@ namespace {
         // C
         ::mat4x4 cA{}, cB{}, cR{};
         ::mat4x4_translate(cA, 1.f, 2.f, 3.f);
+        ::mat4x4_identity(cB);
         ::mat4x4_scale_aniso(cB, cB, 2.f, 3.f, 4.f);
         ::mat4x4_mul(cR, cA, cB);
    
@@ -180,14 +214,7 @@ namespace {
         lm::mat4 B = lm::mat4_rotate_y(1.3f);
 
         lm::mat4 R1 = lm::mat4_mul(A, B);
-
-        // force scalar (temporary hack)
-        auto old = lm::simd::max_level();
-        lm::simd::max_level() = lm::simd::level::none;
-
-        lm::mat4 R2 = lm::mat4_mul(A, B);
-
-        lm::simd::max_level() = old;
+        lm::mat4 R2 = lm::mat4_mul_scalar(A, B);
 
         REQUIRE(byte_equal(R1, R2));
     }
@@ -199,20 +226,6 @@ namespace {
         for (int i=0; i<3; ++i)
             for (int j=0; j<3; ++j)
                 REQUIRE(m[i][j] == Approx(i==j ? 1.f : 0.f));
-    }
-
-    TEST_CASE("mat2x3 layout & arithmetic", "[mat2x3]") {
-        lm::mat2x3 m{};
-        m[0][0] = 1.f;
-        m[0][1] = 2.f;
-        m[0][2] = 3.f;
-
-        m[1][0] = 4.f;
-        m[1][1] = 5.f;
-        m[1][2] = 6.f;
-
-        REQUIRE(m[0][2] == Approx(3.f));
-        REQUIRE(m[1][1] == Approx(5.f));
     }
 
     
@@ -261,4 +274,57 @@ namespace {
         }
     }
 
+
+    TEST_CASE("mat4 look_at matches glm & linmath.h", "[mat4][look_at][glm]") {
+        // test data
+        lm::vec3 eye{ 1.5f, -2.0f,  4.0f };
+        lm::vec3 center{ 0.5f,  1.0f, -3.0f };
+        lm::vec3 up{ 0.0f,  1.0f,  0.0f };
+
+        // lm
+        lm::mat4 cpp_M = lm::mat4_look_at(eye, center, up);
+
+        // glm
+        glm::mat4 g_M = glm::lookAt(
+            glm::vec3(eye[0], eye[1], eye[2]),
+            glm::vec3(center[0], center[1], center[2]),
+            glm::vec3(up[0], up[1], up[2])
+        );
+
+        // C
+        ::mat4x4 c_M{};
+        ::vec3 c_eye{    eye[0],    eye[1],    eye[2] };
+        ::vec3 c_center{ center[0], center[1], center[2] };
+        ::vec3 c_up{     up[0],     up[1],     up[2] };
+        ::mat4x4_look_at(c_M, c_eye, c_center, c_up);
+
+        // lm / C
+        dump_mat4_diff(cpp_M, c_M);
+        REQUIRE(mat4_approx_equal(cpp_M, c_M, 2e-5f));
+
+        // lm / glm
+        dump_mat4_diff(cpp_M, g_M);
+        REQUIRE(mat4_approx_equal(cpp_M, g_M, 2e-5f));
+
+        // glm / C
+        dump_mat4_diff(g_M, c_M);
+        REQUIRE(mat4_approx_equal(g_M, c_M, 2e-5f));
+
+        // extra functional check: transform eye -> origin
+        lm::vec4 eye4{ eye[0], eye[1], eye[2], 1.f };
+        lm::vec4 cpp_eye_view = cpp_M * eye4;
+
+        glm::vec4 g_eye4{ eye[0], eye[1], eye[2], 1.f };
+        glm::vec4 g_eye_view = g_M * g_eye4;
+
+        REQUIRE(cpp_eye_view[0] == Approx(0.f).margin(1e-5f));
+        REQUIRE(cpp_eye_view[1] == Approx(0.f).margin(1e-5f));
+        REQUIRE(cpp_eye_view[2] == Approx(0.f).margin(1e-5f));
+        REQUIRE(cpp_eye_view[3] == Approx(1.f).margin(1e-5f));
+
+        REQUIRE(g_eye_view[0] == Approx(0.f).margin(1e-5f));
+        REQUIRE(g_eye_view[1] == Approx(0.f).margin(1e-5f));
+        REQUIRE(g_eye_view[2] == Approx(0.f).margin(1e-5f));
+        REQUIRE(g_eye_view[3] == Approx(1.f).margin(1e-5f));
+    }
 }

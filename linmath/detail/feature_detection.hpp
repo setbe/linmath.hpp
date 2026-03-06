@@ -33,6 +33,16 @@
 #   define LMATH_CXX17
 #endif
 
+// -------------------- Force inline ------------------------------------------
+
+#if defined(COMPILER_MSVC)
+#   define LMATH_FORCE_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#   define LMATH_FORCE_INLINE inline __attribute__((always_inline))
+#else
+#   define LMATH_FORCE_INLINE inline
+#endif
+
 // -------------------- Attribute / constexpr macros --------------------------
 
 #if defined(LMATH_CXX17)
